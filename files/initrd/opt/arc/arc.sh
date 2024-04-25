@@ -238,20 +238,18 @@ function arcVersion() {
   MODEL="$(readConfigKey "model" "${USER_CONFIG_FILE}")"
   PLATFORM="$(readModelKey "${MODEL}" "platform")"
   PRODUCTVER="$(readConfigKey "productver" "${USER_CONFIG_FILE}")"
-  if [ "${ARCRECOVERY}" != "true" ]; then
-    # Select Build for DSM
-    ITEMS="$(readConfigEntriesArray "productvers" "${MODEL_CONFIG_PATH}/${MODEL}.yml" | sort -r)"
-    dialog --clear --no-items --nocancel --backtitle "$(backtitle)" \
-      --menu "Choose a Version" 7 30 0 ${ITEMS} 2>"${TMP_PATH}/resp"
-    resp=$(cat ${TMP_PATH}/resp)
-    [ -z "${resp}" ] && return 1
-    if [ "${PRODUCTVER}" != "${resp}" ]; then
-      PRODUCTVER="${resp}"
-      writeConfigKey "productver" "${PRODUCTVER}" "${USER_CONFIG_FILE}"
-      if [[ -f "${ORI_ZIMAGE_FILE}" || -f "${ORI_RDGZ_FILE}" || -f "${MOD_ZIMAGE_FILE}" || -f "${MOD_RDGZ_FILE}" ]]; then
-        # Delete old files
-        rm -f "${ORI_ZIMAGE_FILE}" "${ORI_RDGZ_FILE}" "${MOD_ZIMAGE_FILE}" "${MOD_RDGZ_FILE}"
-      fi
+  # Select Build for DSM
+  ITEMS="$(readConfigEntriesArray "productvers" "${MODEL_CONFIG_PATH}/${MODEL}.yml" | sort -r)"
+  dialog --clear --no-items --nocancel --backtitle "$(backtitle)" \
+    --menu "Choose a Version" 7 30 0 ${ITEMS} 2>"${TMP_PATH}/resp"
+  resp=$(cat ${TMP_PATH}/resp)
+  [ -z "${resp}" ] && return 1
+  if [ "${PRODUCTVER}" != "${resp}" ]; then
+    PRODUCTVER="${resp}"
+    writeConfigKey "productver" "${PRODUCTVER}" "${USER_CONFIG_FILE}"
+    if [[ -f "${ORI_ZIMAGE_FILE}" || -f "${ORI_RDGZ_FILE}" || -f "${MOD_ZIMAGE_FILE}" || -f "${MOD_RDGZ_FILE}" ]]; then
+      # Delete old files
+      rm -f "${ORI_ZIMAGE_FILE}" "${ORI_RDGZ_FILE}" "${MOD_ZIMAGE_FILE}" "${MOD_RDGZ_FILE}"
     fi
   fi
   PRODUCTVER="$(readConfigKey "productver" "${USER_CONFIG_FILE}")"
@@ -288,7 +286,7 @@ function arcPatch() {
   MODEL="$(readConfigKey "model" "${USER_CONFIG_FILE}")"
   DT="$(readModelKey "${MODEL}" "dt")"
   ARCCONF="$(readConfigKey "arc.serial" "${MODEL_CONFIG_PATH}/${MODEL}.yml")"
-  if [[ "${ARCRECOVERY}" != "true" && -n "${ARCCONF}" ]]; then
+  if [ -n "${ARCCONF}" ]; then
     dialog --clear --backtitle "$(backtitle)" \
       --nocancel --title "Arc Patch"\
       --menu "Do you want to use Syno Services?" 7 50 0 \
@@ -327,7 +325,7 @@ function arcPatch() {
       writeConfigKey "arc.patch" "user" "${USER_CONFIG_FILE}"
     fi
     writeConfigKey "arc.sn" "${SN}" "${USER_CONFIG_FILE}"
-  elif [[ "${ARCRECOVERY}" != "true" && -z "${ARCCONF}" ]]; then
+  elif [ -z "${ARCCONF}" ]; then
     dialog --clear --backtitle "$(backtitle)" \
       --nocancel --title "Non Arc Patch Model" \
       --menu "Please select an Option?" 8 50 0 \
@@ -437,6 +435,11 @@ function premake() {
   # Memory: Set mem_max_mb to the amount of installed memory to bypass Limitation
   writeConfigKey "synoinfo.mem_max_mb" "${RAMMAX}" "${USER_CONFIG_FILE}"
   writeConfigKey "synoinfo.mem_min_mb" "${RAMMIN}" "${USER_CONFIG_FILE}"
+  # Optimized Synoinfo
+  writeConfigKey "synoinfo.support_trim" "yes" "${USER_CONFIG_FILE}"
+  writeConfigKey "synoinfo.support_disk_hibernation" "yes" "${USER_CONFIG_FILE}"
+  writeConfigKey "synoinfo.support_btrfs_dedupe" "yes" "${USER_CONFIG_FILE}"
+  writeConfigKey "synoinfo.support_tiny_btrfs_dedupe" "yes" "${USER_CONFIG_FILE}"
   # eMMC Boot Support
   if [ "${EMMCBOOT}" = "true" ]; then
     writeConfigKey "modules.mmc_block" "" "${USER_CONFIG_FILE}"
@@ -842,7 +845,7 @@ function arcAutomated() {
   # read model config for dt and aes
   MODEL="$(readConfigKey "model" "${USER_CONFIG_FILE}")"
   DT="$(readModelKey "${MODEL}" "dt")"
-  ARCCONF="$(readModelKey "${M}" "arc.serial")"
+  ARCCONF="$(readModelKey "${MODEL}" "arc.serial")"
   [ -n "${ARCCONF}" ] && ARCPATCH="true" || ARCPATCH="false"
   if [ "${ARCPATCH}" = "true" ]; then
     SN="$(readModelKey "${MODEL}" "arc.serial")"
@@ -918,6 +921,11 @@ function autopremake() {
   # Memory: Set mem_max_mb to the amount of installed memory to bypass Limitation
   writeConfigKey "synoinfo.mem_max_mb" "${RAMMAX}" "${USER_CONFIG_FILE}"
   writeConfigKey "synoinfo.mem_min_mb" "${RAMMIN}" "${USER_CONFIG_FILE}"
+  # Optimized Synoinfo
+  writeConfigKey "synoinfo.support_trim" "yes" "${USER_CONFIG_FILE}"
+  writeConfigKey "synoinfo.support_disk_hibernation" "yes" "${USER_CONFIG_FILE}"
+  writeConfigKey "synoinfo.support_btrfs_dedupe" "yes" "${USER_CONFIG_FILE}"
+  writeConfigKey "synoinfo.support_tiny_btrfs_dedupe" "yes" "${USER_CONFIG_FILE}"
   # eMMC Boot Support
   if [ "${EMMCBOOT}" = "true" ]; then
     writeConfigKey "modules.mmc_block" "" "${USER_CONFIG_FILE}"
@@ -1074,6 +1082,9 @@ function automake() {
     # Build is done
     writeConfigKey "arc.builddone" "true" "${USER_CONFIG_FILE}"
     BUILDDONE="$(readConfigKey "arc.builddone" "${USER_CONFIG_FILE}")"
+    if [ "${CUSTOM}" = "false" ]; then
+      rm -f "${PART3_PATH}/automated"
+    fi
     boot && exit 0
   fi
 }
@@ -1082,7 +1093,11 @@ function automake() {
 ###############################################################################
 # Main loop
 if grep -q "automated_arc" /proc/cmdline; then
-  arcAutomated
+  if [ "${CUSTOM}" = "true" ]; then
+    arcAutomated
+  else
+    automake
+  fi
 else
   [ "${BUILDDONE}" = "true" ] && NEXT="3" || NEXT="1"
   while true; do

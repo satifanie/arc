@@ -81,7 +81,6 @@ fi
 VID="$(readConfigKey "vid" "${USER_CONFIG_FILE}")"
 PID="$(readConfigKey "pid" "${USER_CONFIG_FILE}")"
 SN="$(readConfigKey "arc.sn" "${USER_CONFIG_FILE}")"
-KERNELLOAD="$(readConfigKey "arc.kernelload" "${USER_CONFIG_FILE}")"
 KERNELPANIC="$(readConfigKey "arc.kernelpanic" "${USER_CONFIG_FILE}")"
 DIRECTBOOT="$(readConfigKey "arc.directboot" "${USER_CONFIG_FILE}")"
 EMMCBOOT="$(readConfigKey "arc.emmcboot" "${USER_CONFIG_FILE}")"
@@ -108,7 +107,7 @@ CMDLINE['netif_num']="${NIC}"
 if [ "${MACSYS}" = "hardware" ]; then
   CMDLINE['skip_vender_mac_interfaces']="0,1,2,3,4,5,6,7"
 elif [ "${MACSYS}" = "custom" ]; then
-  CMDLINE['skip_vender_mac_interfaces']="$(seq -s, ${NIC} 7)"
+  CMDLINE['skip_vender_mac_interfaces']="$(seq -s, $((${NIC} + 1)) 7)"
 fi
 
 # set fixed cmdline
@@ -141,7 +140,9 @@ CMDLINE['earlyprintk']=""
 CMDLINE['earlycon']="uart8250,io,0x3f8,115200n8"
 CMDLINE['root']="/dev/md0"
 
-[ ! "${MODEL}" = "SA6400" ] && CMDLINE['elevator']="elevator"
+if [ ! "${MODEL}" = "SA6400" ]; then
+  CMDLINE['elevator']="elevator"
+fi
 CMDLINE['loglevel']="15"
 CMDLINE['log_buf_len']="32M"
 
@@ -179,6 +180,7 @@ if [ "${DIRECTBOOT}" = "true" ]; then
   grub-editenv ${GRUB_PATH}/grubenv set next_entry="direct"
   echo -e "\033[1;34mReboot with Directboot\033[0m"
   exec reboot
+  exit 0
 elif [ "${DIRECTBOOT}" = "false" ]; then
   BOOTIPWAIT="$(readConfigKey "arc.bootipwait" "${USER_CONFIG_FILE}")"
   echo -e "\033[1;34mDetected ${NIC} NIC.\033[0m \033[1;37mWaiting for Connection:\033[0m"
@@ -226,19 +228,21 @@ elif [ "${DIRECTBOOT}" = "false" ]; then
   done
   rm -f WB WC
   echo -en "\r$(printf "%$((${#MSG} * 2))s" " ")\n"
+
   echo -e "\033[1;37mLoading DSM kernel...\033[0m"
 
   # Executes DSM kernel via KEXEC
-  kexec -l "${MOD_ZIMAGE_FILE}" --initrd "${MOD_RDGZ_FILE}" --command-line="${CMDLINE_LINE}" >"${LOG_FILE}" 2>&1 || dieLog
+  KEXECARGS=""
+  kexec ${KEXECARGS} -l "${MOD_ZIMAGE_FILE}" --initrd "${MOD_RDGZ_FILE}" --command-line="${CMDLINE_LINE}" >"${LOG_FILE}" 2>&1 || dieLog
   echo -e "\033[1;37m"Booting DSM..."\033[0m"
-  for T in $(w | grep -v "TTY" | awk -F' ' '{print $2}')
-  do
-    echo -e "\n\033[1;37mThis interface will not be operational. Wait a few minutes.\033[0m\nUse \033[1;34mhttp://${IPCON}:5000\033[0m or try \033[1;34mhttp://find.synology.com/ \033[0mto find DSM and proceed.\n" >"/dev/${T}" 2>/dev/null || true
+  for T in $(w | grep -v "TTY" | awk -F' ' '{print $2}'); do
+    [ -w "/dev/${T}" ] && echo -e "\n\033[1;37mThis interface will not be operational. Wait a few minutes.\033[0m\nUse \033[1;34mhttp://${IPCON}:5000\033[0m or try \033[1;34mhttp://find.synology.com/ \033[0mto find DSM and proceed.\n" >"/dev/${T}" 2>/dev/null || true
   done
 
   # Clear logs for dbgutils addons
   rm -rf "${PART1_PATH}/logs" >/dev/null 2>&1 || true
 
+  KERNELLOAD="$(readConfigKey "arc.kernelload" "${USER_CONFIG_FILE}")"
   [ "${KERNELLOAD}" = "kexec" ] && kexec -i -a -e || poweroff
   exit 0
 fi
