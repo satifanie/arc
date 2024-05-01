@@ -22,7 +22,7 @@ printf "\033[1;30m%*s\033[A\n" ${COLUMNS} ""
 printf "\033[1;34m%*s\033[0m\n" ${COLUMNS} "${BANNER}"
 printf "\033[1;34m%*s\033[0m\n" $(((${#TITLE} + ${COLUMNS}) / 2)) "${TITLE}"
 TITLE="Boot:"
-[ ${EFI} -eq 1 ] && TITLE+=" [UEFI]" || TITLE+=" [Legacy]"
+[ ${EFI} -eq 1 ] && TITLE+=" [UEFI]" || TITLE+=" [BIOS]"
 TITLE+=" [${BUS}]"
 printf "\033[1;34m%*s\033[0m\n" $(((${#TITLE} + ${COLUMNS}) / 2)) "${TITLE}"
 
@@ -97,19 +97,6 @@ CMDLINE['vid']="${VID}"
 CMDLINE['pid']="${PID}"
 CMDLINE['sn']="${SN}"
 
-NIC=0
-for ETH in ${ETHX}; do
-  MAC="$(readConfigKey "mac.${ETH}" "${USER_CONFIG_FILE}")"
-  [ -n "${MAC}" ] && NIC=$((${NIC} + 1)) && CMDLINE["mac${NIC}"]="${MAC}"
-done
-CMDLINE['netif_num']="${NIC}"
-
-if [ "${MACSYS}" = "hardware" ]; then
-  CMDLINE['skip_vender_mac_interfaces']="0,1,2,3,4,5,6,7"
-elif [ "${MACSYS}" = "custom" ]; then
-  CMDLINE['skip_vender_mac_interfaces']="$(seq -s, $((${NIC} + 1)) 7)"
-fi
-
 # set fixed cmdline
 if grep -q "force_junior" /proc/cmdline; then
   CMDLINE['force_junior']=""
@@ -126,7 +113,7 @@ fi
 if [ ! "${BUS}" = "usb" ]; then
   SZ=$(blockdev --getsz ${LOADER_DISK} 2>/dev/null)  # SZ=$(cat /sys/block/${LOADER_DISK/\/dev\//}/size)
   SS=$(blockdev --getss ${LOADER_DISK} 2>/dev/null)  # SS=$(cat /sys/block/${LOADER_DISK/\/dev\//}/queue/hw_sector_size)
-  SIZE=$((${SZ} * ${SS} / 1024 / 1024 + 10))
+  SIZE=$((${SZ:-0} * ${SS:-0} / 1024 / 1024 + 10))
   # Read SATADoM type
   DOM="$(readModelKey "${MODEL}" "dom")"
   CMDLINE['synoboot_satadom']="${DOM}"
@@ -138,32 +125,57 @@ CMDLINE['console']="ttyS0,115200n8"
 CMDLINE['consoleblank']="600"
 CMDLINE['earlyprintk']=""
 CMDLINE['earlycon']="uart8250,io,0x3f8,115200n8"
-CMDLINE['root']="/dev/md0"
-
-if [ ! "${MODEL}" = "SA6400" ]; then
-  CMDLINE['elevator']="elevator"
+if [ "${EMMCBOOT}" = "true" ]; then
+  CMDLINE['root']="/dev/mmcblk0p1"
+else
+  CMDLINE['root']="/dev/md0"
+fi
+NIC=0
+for ETH in ${ETHX}; do
+  MAC="$(readConfigKey "mac.${ETH}" "${USER_CONFIG_FILE}")"
+  [ -n "${MAC}" ] && NIC=$((${NIC} + 1)) && CMDLINE["mac${NIC}"]="${MAC}"
+done
+CMDLINE['netif_num']="${NIC}"
+if [ "${MACSYS}" = "hardware" ]; then
+  CMDLINE['skip_vender_mac_interfaces']="0,1,2,3,4,5,6,7"
+elif [ "${MACSYS}" = "custom" ]; then
+  CMDLINE['skip_vender_mac_interfaces']="$(seq -s, $((${NIC} + 1)) 7)"
 fi
 CMDLINE['loglevel']="15"
 CMDLINE['log_buf_len']="32M"
-
+CMDLINE["HddHotplug"]="1"
+CMDLINE["elevator"]="elevator"
 if [ -n "$(ls /dev/mmcblk* 2>/dev/null)" ] && [ ! "${BUS}" = "mmc" ] && [ ! "${EMMCBOOT}" = "true" ]; then
   [ ! "${CMDLINE['modprobe.blacklist']}" = "" ] && CMDLINE['modprobe.blacklist']+=","
   CMDLINE['modprobe.blacklist']+="sdhci,sdhci_pci,sdhci_acpi"
 fi
-
-if [ "$(readModelKey "${MODEL}" "dt")" = "true" ] && ! echo "epyc7002 purley broadwellnkv2" | grep -wq "$(readModelKey "${MODEL}" "platform")"; then
-  [ ! "${CMDLINE['modprobe.blacklist']}" = "" ] && CMDLINE['modprobe.blacklist']+=","
-  CMDLINE['modprobe.blacklist']+="mpt3sas"
+DT="$(readModelKey "${MODEL}" "dt")"
+PLATFORM="$(readModelKey "${MODEL}" "platform")"
+PLATFORM=${PLATFORM:-"unknown"}
+if [ "${DT}" = "true" ]; then
+  CMDLINE["vender_format_version"]="2"
+  CMDLINE["syno_ttyS0"]="serial,0x3f8"
+  CMDLINE["syno_ttyS1"]="serial,0x2f8"
+  if ! echo "epyc7002 purley broadwellnkv2" | grep -wq "${PLATFORM}"; then
+    [ ! "${CMDLINE['modprobe.blacklist']}" = "" ] && CMDLINE['modprobe.blacklist']+=","
+    CMDLINE['modprobe.blacklist']+="mpt3sas"
+  fi
+else
+  CMDLINE["SMBusHddDynamicPower"]="1"
+  CMDLINE["syno_hdd_detect"]="0"
+  CMDLINE["syno_hdd_powerup_seq"]="0"
+  CMDLINE["vender_format_version"]="2"
 fi
-
+if echo "epyc7002 apollolake geminilake kvmx64" | grep -wq "${PLATFORM}"; then
+  CMDLINE["intel_iommu"]="igfx_off"
+fi
+if echo "purley broadwellnkv2" | grep -wq "${PLATFORM}"; then
+  CMDLINE["SASmodel"]="1"
+fi
 # Read cmdline
 while IFS=': ' read -r KEY VALUE; do
   [ -n "${KEY}" ] && CMDLINE["${KEY}"]="${VALUE}"
-done <<<$(readModelMap "${MODEL}" "productvers.[${PRODUCTVER}].cmdline")
-while IFS=': ' read -r KEY VALUE; do
-  [ -n "${KEY}" ] && CMDLINE["${KEY}"]="${VALUE}"
 done <<<$(readConfigMap "cmdline" "${USER_CONFIG_FILE}")
-
 # Prepare command line
 CMDLINE_LINE=""
 for KEY in ${!CMDLINE[@]}; do
@@ -193,7 +205,11 @@ elif [ "${DIRECTBOOT}" = "false" ]; then
       MSG="DHCP"
       if [ -n "${IP}" ]; then
         SPEED=$(ethtool ${ETH} 2>/dev/null | grep "Speed:" | awk '{print $2}')
-        echo -e "\r\033[1;37m${DRIVER} (${SPEED} | ${MSG}):\033[0m Access \033[1;34mhttp://${IP}:5000\033[0m to connect to DSM via web."
+        if [[ "${IP}" =~ ^169\.254\..* ]]; then
+          echo -e "\r\033[1;37m${DRIVER} (${SPEED} | ${MSG}):\033[0m LINK LOCAL (No DHCP server detected.)"
+        else
+          echo -e "\r\033[1;37m${DRIVER} (${SPEED} | ${MSG}):\033[0m Access \033[1;34mhttp://${IP}:5000\033[0m to connect to DSM via web."
+        fi
         ethtool -s ${ETH} wol g 2>/dev/null
         [ ! -n "${IPCON}" ] && IPCON="${IP}"
         break
@@ -230,6 +246,19 @@ elif [ "${DIRECTBOOT}" = "false" ]; then
   echo -en "\r$(printf "%$((${#MSG} * 2))s" " ")\n"
 
   echo -e "\033[1;37mLoading DSM kernel...\033[0m"
+
+  DSMLOGO="$(readConfigKey "arc.dsmlogo" "${USER_CONFIG_FILE}")"
+  if [[ "${DSMLOGO}" = "true" && -c "/dev/fb0" ]]; then
+    [[ "${IPCON}" =~ ^169\.254\..* ]] && IPCON=""
+    if [ -n "${IPCON}" ]; then
+      URL="http://${IPCON}:5000" || URL="http://find.synology.com/"
+      python ${ARC_PATH}/include/functions.py makeqr -d "${URL}" -l "6" -o "${TMP_PATH}/qrcode_boot.png"
+      [ -f "${TMP_PATH}/qrcode_boot.png" ] && echo | fbv -acufi "${TMP_PATH}/qrcode_boot.png" >/dev/null 2>/dev/null || true
+    else
+      python ${ARC_PATH}/include/functions.py makeqr -f "${ARC_PATH}/include/syno.png" -l "7" -o "${TMP_PATH}/qrcode_syno.png"
+      [ -f "${TMP_PATH}/qrcode_syno.png" ] && echo | fbv -acufi "${TMP_PATH}/qrcode_syno.png" >/dev/null 2>/dev/null || true
+    fi
+  fi
 
   # Executes DSM kernel via KEXEC
   KEXECARGS=""

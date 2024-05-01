@@ -12,9 +12,13 @@ function getnet() {
       ARCMAC=""
     done
   elif [ "${ARCPATCH}" = "false" ]; then
+    ETHN=$(ls /sys/class/net/ 2>/dev/null | grep eth | wc -l)
+    MACS=$(generateMacAddress "${MODEL}" ${ETHN})
+    N=1
     for ETH in ${ETHX}; do
-      MACS=$(generateMacAddress "${MODEL}" 1)
+      MAC=$(echo "${MACS}" | cut -d ' ' -f ${N})
       writeConfigKey "mac.${ETH}" "${MAC}" "${USER_CONFIG_FILE}"
+      N=$((${N} + 1))
     done
   elif [ "${ARCPATCH}" = "user" ]; then
     # User Mac
@@ -65,10 +69,14 @@ function autogetnet() {
       ARCMACNUM=$((${ARCMACNUM} + 1))
       ARCMAC=""
     done
-  elif [ "${ARCPATCH}" = "false" ]; then
+  else
+    ETHN=$(ls /sys/class/net/ 2>/dev/null | grep eth | wc -l)
+    MACS=$(generateMacAddress "${MODEL}" ${ETHN})
+    N=1
     for ETH in ${ETHX}; do
-      MACS=$(generateMacAddress "${MODEL}" 1)
+      MAC=$(echo "${MACS}" | cut -d ' ' -f ${N})
       writeConfigKey "mac.${ETH}" "${MAC}" "${USER_CONFIG_FILE}"
+      N=$((${N} + 1))
     done
   fi
   writeConfigKey "arc.macsys" "hardware" "${USER_CONFIG_FILE}"

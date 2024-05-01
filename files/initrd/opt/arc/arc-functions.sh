@@ -3,7 +3,7 @@
 function editUserConfig() {
   while true; do
     dialog --backtitle "$(backtitle)" --title "Edit with caution" \
-      --editbox "${USER_CONFIG_FILE}" 0 0 2>"${TMP_PATH}/userconfig"
+      --ok-label "Save" --editbox "${USER_CONFIG_FILE}" 0 0 2>"${TMP_PATH}/userconfig"
     [ $? -ne 0 ] && return 1
     mv -f "${TMP_PATH}/userconfig" "${USER_CONFIG_FILE}"
     ERRORS=$(yq eval "${USER_CONFIG_FILE}" 2>&1)
@@ -95,8 +95,9 @@ function modulesMenu() {
       2 "Select loaded Modules" \
       3 "Select all Modules" \
       4 "Deselect all Modules" \
-      5 "Choose Modules to include" \
+      5 "Choose Modules" \
       6 "Add external module" \
+      7 "Choose Modules to copy to DSM" \
       2>"${TMP_PATH}/resp"
     [ $? -ne 0 ] && break
     case "$(cat ${TMP_PATH}/resp)" in
@@ -206,6 +207,21 @@ function modulesMenu() {
         writeConfigKey "arc.builddone" "false" "${USER_CONFIG_FILE}"
         BUILDDONE="$(readConfigKey "arc.builddone" "${USER_CONFIG_FILE}")"
         ;;
+      7)
+        if [ -f ${USER_UP_PATH}/modulelist ]; then
+          cp -f "${USER_UP_PATH}/modulelist" "${TMP_PATH}/modulelist.tmp"
+        else
+          cp -f "${ARC_PATH}/include/modulelist" "${TMP_PATH}/modulelist.tmp"
+        fi
+        while true; do
+          DIALOG --title "Edit with caution" \
+            --editbox "${TMP_PATH}/modulelist.tmp" 0 0 2>"${TMP_PATH}/modulelist.user"
+          [ $? -ne 0 ] && return
+          [ ! -d "${USER_UP_PATH}" ] && mkdir -p "${USER_UP_PATH}"
+          mv -f "${TMP_PATH}/modulelist.user" "${USER_UP_PATH}/modulelist"
+          dos2unix "${USER_UP_PATH}/modulelist"
+          break
+        done
     esac
   done
   return
@@ -226,7 +242,6 @@ function cmdlineMenu() {
   echo "5 \"PCI/IRQ Fix\""                                      >>"${TMP_PATH}/menu"
   echo "6 \"C-State Fix\""                                      >>"${TMP_PATH}/menu"
   echo "7 \"Show user Cmdline\""                                >>"${TMP_PATH}/menu"
-  echo "8 \"Show Model/Build Cmdline\""                         >>"${TMP_PATH}/menu"
   echo "9 \"Kernelpanic Behavior\""                             >>"${TMP_PATH}/menu"
   # Loop menu
   while true; do
@@ -237,9 +252,10 @@ function cmdlineMenu() {
       1)
         MSG=""
         MSG+="Commonly used Parameter:\n"
-        MSG+=" * \Z4disable_mtrr_trim=\Zn\n    disables kernel trim any uncacheable memory out.\n"
+        MSG+=" * \Z4disable_mtrr_trim=\Zn\n    Disables kernel trim any uncacheable memory out.\n"
         MSG+=" * \Z4intel_idle.max_cstate=1\Zn\n    Set the maximum C-state depth allowed by the intel_idle driver.\n"
-        MSG+=" * \Z4pcie_port_pm=off\Zn\n    Turn off the power management of the PCIe port.\n"
+        MSG+=" * \Z4pcie_port_pm=off\Zn\n    Disable the power management of the PCIe port.\n"
+        MSG+=" * \Z4pci=realloc=off\Zn\n    Disable reallocating PCI bridge resources.\n"
         MSG+=" * \Z4libata.force=noncq\Zn\n    Disable NCQ for all SATA ports.\n"
         MSG+=" * \Z4i915.enable_guc=2\Zn\n    Enable the GuC firmware on Intel graphics hardware.(value: 1,2 or 3)\n"
         MSG+=" * \Z4i915.max_vfs=7\Zn\n     Set the maximum number of virtual functions (VFs) that can be created for Intel graphics hardware.\n"
@@ -389,14 +405,6 @@ function cmdlineMenu() {
           --aspect 18 --msgbox "${ITEMS}" 0 0
         ;;
       8)
-        ITEMS=""
-        while IFS=': ' read -r KEY VALUE; do
-          ITEMS+="${KEY}: ${VALUE}\n"
-        done <<<$(readModelMap "${MODEL}" "productvers.[${PRODUCTVER}].cmdline")
-        dialog --backtitle "$(backtitle)" --title "Model/Version cmdline" \
-          --aspect 18 --msgbox "${ITEMS}" 0 0
-        ;;
-      9)
         rm -f "${TMP_PATH}/opts"
         echo "5 \"Reboot after 5 seconds\"" >>"${TMP_PATH}/opts"
         echo "0 \"No reboot\"" >>"${TMP_PATH}/opts"
@@ -541,10 +549,10 @@ function storagepanelMenu() {
   CONFDONE="$(readConfigKey "arc.confdone" "${USER_CONFIG_FILE}")"
   if [ "${CONFDONE}" = "true" ]; then
     dialog --backtitle "$(backtitle)" --title "StoragePanel" \
-      --aspect 18 --msgbox "Enable custom StoragePanel Addon." 0 0
-    ITEMS="$(echo -e "2_Bay \n4_Bay \n8_Bay \n12_Bay \n16_Bay \n24_Bay \n60_Bay \n")"
+      --aspect 18 --msgbox "StoragePanel Addon enabled." 0 0
+    ITEMS="$(echo -e "RACK_2_Bay \nRACK_4_Bay \nRACK_8_Bay \nRACK_12_Bay \nRACK_16_Bay \nRACK_24_Bay \nRACK_60_Bay \nTOWER_1_Bay \nTOWER_2_Bay \nTOWER_4_Bay \nTOWER_6_Bay \nTOWER_8_Bay \nTOWER_12_Bay \n")"
     dialog --backtitle "$(backtitle)" --title "StoragePanel" \
-      --default-item "24_Bay" --no-items --menu "Choose a Disk Panel" 0 0 0 ${ITEMS} \
+      --default-item "RACK_24_Bay" --no-items --menu "Choose a Disk Panel" 0 0 0 ${ITEMS} \
       2>"${TMP_PATH}/resp"
     resp=$(cat ${TMP_PATH}/resp)
     [ -z "${resp}" ] && return 1
@@ -556,7 +564,7 @@ function storagepanelMenu() {
     resp=$(cat ${TMP_PATH}/resp)
     [ -z "${resp}" ] && return 1
     M2PANEL=${resp}
-    STORAGEPANEL="RACK_${STORAGE} ${M2PANEL}"
+    STORAGEPANEL="${STORAGE} ${M2PANEL}"
     writeConfigKey "addons.storagepanel" "${STORAGEPANEL}" "${USER_CONFIG_FILE}"
     writeConfigKey "arc.builddone" "false" "${USER_CONFIG_FILE}"
     BUILDDONE="$(readConfigKey "arc.builddone" "${USER_CONFIG_FILE}")"
@@ -610,6 +618,20 @@ function backupMenu() {
         if [ -f "${USER_CONFIG_FILE}" ]; then
           dialog --backtitle "$(backtitle)" --title "Restore Config" \
             --aspect 18 --msgbox "Config restore successful!" 0 0
+          # Ask for Build
+          dialog --clear --backtitle "$(backtitle)" \
+            --menu "Config done -> Build now?" 7 50 0 \
+            1 "Yes - Build Arc Loader now" \
+            2 "No - I want to make changes" \
+          2>"${TMP_PATH}/resp"
+          resp=$(cat ${TMP_PATH}/resp)
+          [ -z "${resp}" ] && return 1
+          if [ ${resp} -eq 1 ]; then
+            premake
+          elif [ ${resp} -eq 2 ]; then
+            dialog --clear --no-items --backtitle "$(backtitle)"
+            return 1
+          fi
         else
           dialog --backtitle "$(backtitle)" --title "Restore Config" \
             --aspect 18 --msgbox "No Config found!" 0 0
@@ -687,6 +709,7 @@ function updateMenu() {
       4 "Update Modules" \
       5 "Update Configs" \
       6 "Update LKMs" \
+      7 "Automated Update Mode" \
       2>"${TMP_PATH}/resp"
     [ $? -ne 0 ] && return 1
     case "$(cat ${TMP_PATH}/resp)" in
@@ -983,6 +1006,11 @@ function updateMenu() {
         BUILDDONE="$(readConfigKey "arc.builddone" "${USER_CONFIG_FILE}")"
         dialog --backtitle "$(backtitle)" --title "Update LKMs" --aspect 18 \
           --msgbox "LKMs updated successful! New Version: ${TAG}" 0 0
+        ;;
+      7)
+        dialog --backtitle "$(backtitle)" --title "Automated Update" --aspect 18 \
+          --msgbox "Loader will reboot to Automated Update Mode.\nPlease wait until progress is finished!" 0 0
+        rebootTo update
         ;;
     esac
   done
@@ -1767,7 +1795,7 @@ function formatdisks() {
     [[ "${KNAME}" = /dev/md* ]] && continue
     [ -z "${KMODEL}" ] && KMODEL="${TYPE}"
     echo "\"${KNAME}\" \"${KMODEL}\" \"off\"" >>"${TMP_PATH}/opts"
-  done <<<$(lsblk -pno KNAME,MODEL,PKNAME,TYPE)
+  done <<<$(lsblk -pno KNAME,MODEL,PKNAME,TYPE | sort)
   if [ ! -f "${TMP_PATH}/opts" ]; then
     dialog --backtitle "$(backtitle)" --colors --title "Format Disks" \
       --msgbox "No disk found!" 0 0
@@ -1868,7 +1896,7 @@ function cloneLoader() {
     [ -z "${KMODEL}" ] && KMODEL="${TYPE}"
     [[ "${KNAME}" = "${LOADER_DISK}" || "${PKNAME}" = "${LOADER_DISK}" || "${KMODEL}" = "${LOADER_DISK}" ]] && continue
     echo "\"${KNAME}\" \"${KMODEL}\" \"off\"" >>"${TMP_PATH}/opts"
-  done <<<$(lsblk -dpno KNAME,MODEL,PKNAME,TYPE)
+  done <<<$(lsblk -dpno KNAME,MODEL,PKNAME,TYPE | sort)
   if [ ! -f "${TMP_PATH}/opts" ]; then
     dialog --backtitle "$(backtitle)" --colors --title "Clone Loader" \
       --msgbox "No disk found!" 0 0
@@ -1950,8 +1978,8 @@ function resetLoader() {
 # let user edit the grub.cfg
 function editGrubCfg() {
   while true; do
-    dialog --backtitle "$(backtitle)" --colors --title "Edit grub.cfg with caution" \
-      --editbox "${GRUB_PATH}/grub.cfg" 0 0 2>"${TMP_PATH}/usergrub.cfg"
+    dialog --backtitle "$(backtitle)" --title "Edit with caution" \
+      --ok-label "Save" --editbox "${GRUB_PATH}/grub.cfg" 0 0 2>"${TMP_PATH}/usergrub.cfg"
     [ $? -ne 0 ] && return
     mv -f "${TMP_PATH}/usergrub.cfg" "${GRUB_PATH}/grub.cfg"
     break
@@ -1964,12 +1992,14 @@ function editGrubCfg() {
 function greplogs() {
   if [ -d "${PART1_PATH}/logs" ]; then
     rm -f "${TMP_PATH}/log.tar.gz"
-    tar -czf "${PART1_PATH}/log.tar.gz" "${PART1_PATH}" logs
+    rm -f "${PART1_PATH}/log.tar.gz"
+    tar -czf "${PART1_PATH}/log.tar.gz" "${PART1_PATH}/logs"
     if [ -z "${SSH_TTY}" ]; then # web
       mv -f "${PART1_PATH}/log.tar.gz" "/var/www/data/log.tar.gz"
+      chmod 644 "/var/www/data/log.tar.gz"
       URL="http://$(getIP)/log.tar.gz"
       dialog --backtitle "$(backtitle)" --colors --title "Grep Logs" \
-        --msgbox "Please via ${URL} to download the log,\nAnd unzip it and back it up in order by file name." 0 0
+        --msgbox "Please visit ${URL}\nto download the logs and unzip it and back it up in order by file name." 0 0
     else
       sz -be -B 536870912 "${TMP_PATH}/log.tar.gz"
       dialog --backtitle "$(backtitle)" --colors --title "Grep Logs" \
@@ -1980,7 +2010,7 @@ function greplogs() {
     MSG+="\Z1No log found!\Zn\n\n"
     MSG+="Please do as follows:\n"
     MSG+=" 1. Add dbgutils in Addons and rebuild.\n"
-    MSG+=" 2. Normal use.\n"
+    MSG+=" 2. Boot to DSM.\n"
     MSG+=" 3. Reboot to Config Mode and use this Option.\n"
     dialog --backtitle "$(backtitle)" --colors --title "Grep Logs" \
       --msgbox "${MSG}" 0 0
@@ -1996,9 +2026,10 @@ function getbackup() {
     tar -czf "${TMP_PATH}/dsmconfig.tar.gz" -C "${PART1_PATH}" dsmbackup
     if [ -z "${SSH_TTY}" ]; then # web
       mv -f "${TMP_PATH}/dsmconfig.tar.gz" "/var/www/data/dsmconfig.tar.gz"
+      chmod 644 "/var/www/data/dsmconfig.tar.gz"
       URL="http://$(getIP)/dsmconfig.tar.gz"
       dialog --backtitle "$(backtitle)" --colors --title "DSM Config" \
-        --msgbox "Please via ${URL} to download the dsmconfig,\nAnd unzip it and back it up in order by file name." 0 0
+        --msgbox "Please via ${URL}\nto download the dsmconfig and unzip it and back it up in order by file name." 0 0
     else
       sz -be -B 536870912 "${TMP_PATH}/dsmconfig.tar.gz"
       dialog --backtitle "$(backtitle)" --colors --title "DSM Config" \
@@ -2009,7 +2040,7 @@ function getbackup() {
     MSG+="\Z1No dsmbackup found!\Zn\n\n"
     MSG+="Please do as follows:\n"
     MSG+=" 1. Add dsmconfigbackup in Addons and rebuild.\n"
-    MSG+=" 2. Normal use.\n"
+    MSG+=" 2. Boot to DSM.\n"
     MSG+=" 3. Reboot to Config Mode and use this Option.\n"
     dialog --backtitle "$(backtitle)" --colors --title "DSM Config" \
       --msgbox "${MSG}" 0 0

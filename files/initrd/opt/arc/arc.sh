@@ -66,6 +66,7 @@ MACSYS="$(readConfigKey "arc.macsys" "${USER_CONFIG_FILE}")"
 ODP="$(readConfigKey "arc.odp" "${USER_CONFIG_FILE}")"
 HDDSORT="$(readConfigKey "arc.hddsort" "${USER_CONFIG_FILE}")"
 KERNEL="$(readConfigKey "arc.kernel" "${USER_CONFIG_FILE}")"
+RD_COMPRESSED="$(readConfigKey "rd-compressed" "${USER_CONFIG_FILE}")"
 USBMOUNT="$(readConfigKey "arc.usbmount" "${USER_CONFIG_FILE}")"
 ARCIPV6="$(readConfigKey "arc.ipv6" "${USER_CONFIG_FILE}")"
 EMMCBOOT="$(readConfigKey "arc.emmcboot" "${USER_CONFIG_FILE}")"
@@ -221,6 +222,9 @@ function arcModel() {
     writeConfigKey "synoinfo" "{}" "${USER_CONFIG_FILE}"
     writeConfigKey "modules" "{}" "${USER_CONFIG_FILE}"
     writeConfigKey "addons" "{}" "${USER_CONFIG_FILE}"
+    if [ "${OFFLINE}" = "false" ]; then
+      getLogo "${MODEL}"
+    fi
     CONFDONE="$(readConfigKey "arc.confdone" "${USER_CONFIG_FILE}")"
     BUILDDONE="$(readConfigKey "arc.builddone" "${USER_CONFIG_FILE}")"
     if [[ -f "${ORI_ZIMAGE_FILE}" || -f "${ORI_RDGZ_FILE}" || -f "${MOD_ZIMAGE_FILE}" || -f "${MOD_RDGZ_FILE}" ]]; then
@@ -263,7 +267,7 @@ function arcVersion() {
   writeConfigKey "synoinfo" "{}" "${USER_CONFIG_FILE}"
   while IFS=': ' read -r KEY VALUE; do
     writeConfigKey "synoinfo.\"${KEY}\"" "${VALUE}" "${USER_CONFIG_FILE}"
-  done <<<$(readModelMap "${MODEL}" "productvers.[${PRODUCTVER}].synoinfo")
+  done <<<$(readModelMap "${MODEL}" "synoinfo")
   # Reset modules
   writeConfigKey "modules" "{}" "${USER_CONFIG_FILE}"
   while read -r ID DESC; do
@@ -387,9 +391,11 @@ function arcSettings() {
   # Select Addons
   addonSelection
   # Check for DT and HBA/Raid Controller
-  if [[ "${DT}" = "true" && "${EXTERNALCONTROLLER}" = "true" ]]; then
-    dialog --backtitle "$(backtitle)" --title "Arc Warning" \
-      --msgbox "WARN: You use a HBA/Raid Controller and selected a DT Model.\nThis is still an experimental Feature." 0 0
+  if [ ! "${MODEL}" = "SA6400" ]; then
+    if [[ "${DT}" = "true" && "${EXTERNALCONTROLLER}" = "true" ]]; then
+      dialog --backtitle "$(backtitle)" --title "Arc Warning" \
+        --msgbox "WARN: You use a HBA/Raid Controller and selected a DT Model.\nThis is still an experimental Feature." 0 0
+    fi
   fi
   # Check for more then 8 Ethernet Ports
   DEVICENIC="$(readConfigKey "device.nic" "${USER_CONFIG_FILE}")"
@@ -846,12 +852,13 @@ function arcAutomated() {
   MODEL="$(readConfigKey "model" "${USER_CONFIG_FILE}")"
   DT="$(readModelKey "${MODEL}" "dt")"
   ARCCONF="$(readModelKey "${MODEL}" "arc.serial")"
+  ARCPATCHPRE="$(readConfigKey "arc.patch" "${USER_CONFIG_FILE}")"
   [ -n "${ARCCONF}" ] && ARCPATCH="true" || ARCPATCH="false"
-  if [ "${ARCPATCH}" = "true" ]; then
+  if [[ "${ARCPATCH}" = "true" && "${ARCPATCHPRE}" = "true" ]]; then
     SN="$(readModelKey "${MODEL}" "arc.serial")"
     writeConfigKey "arc.sn" "${SN}" "${USER_CONFIG_FILE}"
     writeConfigKey "arc.patch" "true" "${USER_CONFIG_FILE}"
-  elif [ "${ARCPATCH}" = "false" ]; then
+  else
     SN="$(generateSerial "${MODEL}")"
     writeConfigKey "arc.sn" "${SN}" "${USER_CONFIG_FILE}"
     writeConfigKey "arc.patch" "false" "${USER_CONFIG_FILE}"
@@ -877,7 +884,7 @@ function arcAutomated() {
   writeConfigKey "synoinfo" "{}" "${USER_CONFIG_FILE}"
   while IFS=': ' read -r KEY VALUE; do
     writeConfigKey "synoinfo.\"${KEY}\"" "${VALUE}" "${USER_CONFIG_FILE}"
-  done <<<$(readModelMap "${MODEL}" "productvers.[${PRODUCTVER}].synoinfo")
+  done <<<$(readModelMap "${MODEL}" "synoinfo")
   # Reset modules
   writeConfigKey "modules" "{}" "${USER_CONFIG_FILE}"
   while read -r ID DESC; do
@@ -1180,6 +1187,7 @@ else
         echo "O \"Official Driver Priority: \Z4${ODP}\Zn \" "                                 >>"${TMP_PATH}/menu"
         echo "E \"eMMC Boot Support: \Z4${EMMCBOOT}\Zn \" "                                   >>"${TMP_PATH}/menu"
         echo "o \"Switch MacSys: \Z4${MACSYS}\Zn \" "                                         >>"${TMP_PATH}/menu"
+        echo "W \"DSM RD Compression: \Z4${RD_COMPRESSED}\Zn \" "                             >>"${TMP_PATH}/menu"
         echo "u \"Switch LKM version: \Z4${LKM}\Zn \" "                                       >>"${TMP_PATH}/menu"
       fi
     fi
@@ -1352,6 +1360,12 @@ else
         writeConfigKey "arc.builddone" "false" "${USER_CONFIG_FILE}"
         BUILDDONE="$(readConfigKey "arc.builddone" "${USER_CONFIG_FILE}")"
         NEXT="o"
+        ;;
+      W) [ "${RD_COMPRESSED}" = "true" ] && RD_COMPRESSED='false' || RD_COMPRESSED='true'
+        writeConfigKey "rd-compressed" "${RD_COMPRESSED}" "${USER_CONFIG_FILE}"
+        writeConfigKey "arc.builddone" "false" "${USER_CONFIG_FILE}"
+        BUILDDONE="$(readConfigKey "arc.builddone" "${USER_CONFIG_FILE}")"
+        NEXT="W"
         ;;
       u) [ "${LKM}" = "prod" ] && LKM='dev' || LKM='prod'
         writeConfigKey "lkm" "${LKM}" "${USER_CONFIG_FILE}"
